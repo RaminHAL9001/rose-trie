@@ -1,14 +1,13 @@
 -- "Data/RoseTrie/RoseTrie.hs" provides the RoseTrie data type, a tree combining
 -- properties of a Trie and a RoseTrie.
 -- 
--- Copyright (C) 2008-2015  Ramin Honary.
+-- Copyright (C) 2008-2016  Ramin Honary.
 --
--- Dao is free software: you can redistribute it and/or modify it under the
--- terms of the GNU General Public License as published by the Free Software
--- Foundation, either version 3 of the License, or (at your option) any later
--- version.
+-- This library is free software: you can redistribute it and/or modify it under the terms of
+-- the GNU General Public License as published by the Free Software Foundation, either version 3 of
+-- the License, or (at your option) any later version.
 -- 
--- Dao is distributed in the hope that it will be useful, but WITHOUT ANY
+-- This software is distributed in the hope that it will be useful, but WITHOUT ANY
 -- WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
 -- FOR A PARTICULAR PURPOSE. See the GNU General Public License for more
 -- details.
@@ -17,14 +16,10 @@
 -- this program (see the file called "LICENSE"). If not, see the URL:
 -- <http://www.gnu.org/licenses/agpl.html>.
 
-{-# LANGUAGE DeriveDataTypeable #-}
-{-# LANGUAGE FlexibleInstances #-}
-{-# LANGUAGE MultiParamTypeClasses #-}
-
 -- | A "trie" based on 'Data.Map.Map' where you can store objects @o@ to an arbitrary path
 -- constructed of paths-segments @p@. The idea of the 'RoseTrie' data structure is that it behaves
--- exctly like a 'Data.Map.Map' where the keys of the map are of type @[p]@, but internally, similar
--- paths are merged together to save memory and 'Data.Traversable.traverse' time.
+-- exctly like a 'Data.Map.Map' except each individual 'branch' node is labeled with a path segmet,
+-- and can be accessed and altered arbitrarily.
 --
 -- Because of the way similar paths @[p]@ are merged, when you perform a 'Data.Foldable.foldr',
 -- 'mergeWithKey', or 'Data.Traversable.traverse' operation, you have a choice of how to order the
@@ -59,7 +54,7 @@ import           Data.Word
 
 -- | A 'RoseTrie' is just a @newtype@ around a pair of two elements forming a node, the first being the
 -- leaf of the node, and the second being the branches of the node. The leaf may or may not exist,
--- so it is wrapped in a 'Prelude.Maybe' data structure.
+-- so it is wrapped in a 'Data.Maybe.Maybe' data structure.
 --
 -- When you associate an object @o@ at a path @[p]@, a walk is performed, with each segment of the
 -- path @[p]@ selecting a branch that contains another sub-node. When the path @[p]@ is empty, the
@@ -79,14 +74,24 @@ instance (Ord p, Monoid o) => Monoid (Product (RoseTrie p o)) where
 instance (NFData a, NFData b) => NFData (RoseTrie a b) where
   rnf (RoseTrie (o, m)) = deepseq o $! deepseq m ()
 
-instance (Ord p, Monad m) => FocusesWith [p] m (RoseTrie p o) (Maybe o) where { focus=path; }
-
 instance Foldable (ReduceRoseTrie p) where
   foldr f b (ReduceRoseTrie control tree) = foldr f b $ elems control tree
 
 instance Ord p => Traversable (ReduceRoseTrie p) where
   traverse f (ReduceRoseTrie control tree) = fmap (ReduceRoseTrie control . fromList) $
     traverse (\ (p, o) -> (,) <$> pure p <*> f o) $ assocs control tree
+
+----------------------------------------------------------------------------------------------------
+
+-- | This class provides 'fromRoseTrie', which generates a data structure of type @d@ from a
+-- 'RoseTrie' of type @RoseTrie p o@, similar to how the 'Prelude.Read' class can generate a data
+-- structure from a 'Prelude.String'.
+class DataFromRoseTrie d p o where { fromRoseTrie :: RoseTrie p o -> d; }
+
+-- | This class provides 'fromRoseTrie', which generates a 'RoseTrie' of type @RoseTrie p o@ from a
+-- data type of type @d@, similar to how the 'Prelude.Show' class can generate a 'Prelude.String'
+-- from a data structure.
+class DataToRoseTrie d p o where { toRoseTrie :: d -> RoseTrie p o; }
 
 ----------------------------------------------------------------------------------------------------
 
@@ -116,9 +121,10 @@ instance Functor (ReduceRoseTrie p) where
 
 ----------------------------------------------------------------------------------------------------
 
-treePair :: (Monad m, Ord p) => Lens m (RoseTrie p o) (Maybe o, M.Map p (RoseTrie p o))
-treePair = newLens (\ (RoseTrie t) -> t) (\t (RoseTrie _) -> RoseTrie t)
+roseTrie :: Monad m => Iso m (RoseTrie p o) (Maybe o, M.Map p (RoseTrie p o))
+roseTrie = newIso (\ (RoseTrie o) -> o, RoseTrie)
 
+-- | The empty 'RoseTrie'.
 empty :: RoseTrie p o
 empty = RoseTrie (Nothing, M.empty)
 
@@ -127,53 +133,33 @@ empty = RoseTrie (Nothing, M.empty)
 -- In other words, this function takes a list of transfomration functions that modify a 'RoseTrie',
 -- and starting with an 'empty' 'RoiseTrie', applies each transformation in order to build the
 -- 'RoseTrie'.
-newRoseTrie :: [RoseTrie p o -> RoseTrie p o] -> RoseTrie p o
+newRoseTrie :: [RoseTrie p o -> Identity (RoseTrie p o)] -> RoseTrie p o
 newRoseTrie = with Data.Tree.RoseTrie.empty
 
-leaf :: (Monad m, Ord p) => Lens m (RoseTrie p o) (Maybe o)
-leaf = treePair >>> tuple0
+leaf :: Monad m => Lens m (RoseTrie p o) (Maybe o)
+leaf = isoLens roseTrie >>> tuple0
 
-branches :: (Monad m, Ord p) => Lens m (RoseTrie p o) (M.Map p (RoseTrie p o))
-branches = treePair >>> tuple1
+branches :: Monad m => Lens m (RoseTrie p o) (M.Map p (RoseTrie p o))
+branches = isoLens roseTrie >>> tuple1
 
--- | This is a focusing lens that focuses on a sub-'RoseTrie' at a given path @[p]@. A function that
--- takes two 'RoseTrie's and returns a 'RoseTrie' is required for performing 'Dao.Lens.alter' or
--- 'Dao.Lens.update' operations. This function is not used on 'Dao.Lens.fetch' operations.
---
--- When 'Dao.Lens.update'ing or 'Dao.Lens.alter'ing, the tree in the focus of the 'Dao.Lens.Lens' is
--- passed as the first (left-hand) argument to the given altering function, and the sub-'RoseTrie'
--- found at the path @[p]@ is passed as the second (right-hand) argument.
---
--- For most purposes, the 'Dao.Lens.alter'ing function you want to use is the 'union' function.
-focusSubRoseTrie
-  :: (Monad m, Ord p)
-  => (RoseTrie p o -> RoseTrie p o -> m (RoseTrie p o)) -> [p] -> Lens m (RoseTrie p o) (RoseTrie p o)
-focusSubRoseTrie alt px =
-  newLensM
-    (\  target@(RoseTrie (_, map)) -> case px of
-      []    -> return target
-      p:px  -> maybe (return Data.Tree.RoseTrie.empty) (fetch $ focusSubRoseTrie alt px) (M.lookup p map)
-    )
-    (case px of
-      []    -> flip alt
-      p:px  -> Data.Lens.Minimal.update $
-        branches >>> mapLens p >>> orElse (return Data.Tree.RoseTrie.empty) >>> focusSubRoseTrie alt px
-    )
+-- | This is a focusing lens that focuses on a 'RoseTrie' node at a given path @[p]@, rather than an
+-- element at the given path.
+node :: (Monad m, Ord p) => [p] -> Lens m (RoseTrie p o) (RoseTrie p o)
+node px = Lens
+  ( return . fix
+      (\loop px -> case px of
+        []   -> id
+        p:px -> maybe Data.Tree.RoseTrie.empty (loop px) . fetch (branches >>> mapLens p)
+      ) px
+  , Data.Lens.Minimal.alter' $ foldl
+      (\lens p -> lens >>> branches >>> mapLens p >>>
+        notEmpty Data.Tree.RoseTrie.null Data.Tree.RoseTrie.empty
+      ) id px
+  )
 
 -- | Focuses on an individual leaf at the given path.
 path :: (Monad m, Ord p) => [p] -> Lens m (RoseTrie p o) (Maybe o)
-path px =
-  newLensM
-    (\  (RoseTrie (o, map)) -> case px of
-      []    -> return o
-      p:px  -> maybe (return Nothing) (fetch $ path px) (M.lookup p map)
-    )
-    (\o (RoseTrie (n, map)) -> case px of
-      []    -> return $ RoseTrie (o, map)
-      p:px  -> do
-        t <- Data.Lens.Minimal.update (path px) o $ fromMaybe Data.Tree.RoseTrie.empty $ M.lookup p map
-        return $ RoseTrie (n, M.alter (const $ if Data.Tree.RoseTrie.null t then Nothing else Just t) p map)
-    )
+path px = node px >>> leaf
 
 -- | This function merges two trees together, given a leaf-merging function that can optionally
 -- create or remove leaves based on whether or not leaves exist on the left and right at any given
@@ -239,7 +225,7 @@ alter :: Ord p => (Maybe o -> Maybe o) -> [p] -> RoseTrie p o -> RoseTrie p o
 alter f p = runIdentity . alterM (return . f) p
 
 alterM :: (Monad m, Ord p) => (Maybe o -> m (Maybe o)) -> [p] -> RoseTrie p o -> m (RoseTrie p o)
-alterM f p = Data.Lens.Minimal.alter (path p) f >=> return . snd
+alterM f p = alter' (path p) f
 
 -- | Insert a leaf at a given address, updating it with the combining function if it already exist.
 insertWith :: Ord p => (o -> o -> o) -> [p] -> o -> RoseTrie p o -> RoseTrie p o
@@ -354,14 +340,16 @@ elems control = loop where
   -- This function is not implemented in terms of 'assocs' to avoid stacking the paths, as the paths
   -- will be ignored.
 
--- | Counts the number of *nodes*, which includes the number of 'Branch'es and 'Leaf's.
+-- | Counts the number of *nodes*, which includes the number of 'Branch'es and 'Leaf's. Remember
+-- that 'node's that contain 'branches' may not necessarily contain 'leaf' elements.
 size :: RoseTrie p a -> Word64
 size (RoseTrie (o, m)) = maybe 0 (const 1) o + sum (size <$> M.elems m)
 
+-- | Counts the number of 'leaf's only.
 leafCount :: RoseTrie p a -> Word64
 leafCount = sum . fmap (const 1) . ReduceRoseTrie DepthFirst
 
--- | Counts the number of branches, not leaves.
+-- | Counts the number of branches only, not leaves.
 branchCount :: RoseTrie p a -> Word64
 branchCount (RoseTrie (_, m)) = fromIntegral (M.size m) + sum (branchCount <$> M.elems m)
 
@@ -528,15 +516,19 @@ product = productWith mappend
 -- you might appreciate that a zipper is provided for 'RoseTrie' in this module, and a number of
 -- useful "Control.Monad.State"ful APIs are also provided, namely 'goto' and 'back'.
 -- 
--- Although it should be noted usually, 'Dao.Lens.Lens'es, 'Data.Foldable.fold's,
+-- Although it should be noted usually, 'Data.Lens.Minimal.Lens'es, 'Data.Foldable.fold's,
 -- 'Data.Traversable.traversal's, and 'mergeWithKeyM' are all you will need.
-data ZipRoseTrie p o = ZipRoseTrie (RoseTrie p o) [(p, RoseTrie p o)] deriving (Eq, Ord, Typeable)
+newtype ZipRoseTrie p o = ZipRoseTrie (RoseTrie p o, [(p, RoseTrie p o)])
+  deriving (Eq, Ord, Typeable)
+
+zipRoseTrie :: Monad m => Iso m (ZipRoseTrie p o) (RoseTrie p o, [(p, RoseTrie p o)])
+zipRoseTrie = newIso (\ (ZipRoseTrie o) -> o, ZipRoseTrie)
 
 zipperSubRoseTrie :: Monad m => Lens m (ZipRoseTrie p o) (RoseTrie p o)
-zipperSubRoseTrie = newLens (\ (ZipRoseTrie t _) -> t) (\t (ZipRoseTrie _ h) -> ZipRoseTrie t h)
+zipperSubRoseTrie = isoLens zipRoseTrie >>> tuple0
 
 zipperHistory :: Monad m => Lens m (ZipRoseTrie p o) [(p, RoseTrie p o)]
-zipperHistory = newLens (\ (ZipRoseTrie _ h) -> h) (\h (ZipRoseTrie t _) -> ZipRoseTrie t h)
+zipperHistory = isoLens zipRoseTrie >>> tuple1
 
 -- | A monadic function type that keeps the 'ZipRoseTrie' in a 'Control.Monad.State.StateT' for you, and
 -- instantiates 'Control.Monad.State.MonadState' such that 'Control.Monad.State.get' and
@@ -567,7 +559,7 @@ instance MonadTrans (UpdateRoseTrieT p o) where { lift = UpdateRoseTrieT . lift;
 -- the 'UpdateRoseTrieT' function.
 runUpdateRoseTrieT :: (Functor m, Applicative m, Monad m, Ord p) => UpdateRoseTrieT p o m a -> RoseTrie p o -> m (a, RoseTrie p o)
 runUpdateRoseTrieT f tree = do
-  (a, z) <- runStateT ((\ (UpdateRoseTrieT f) -> f) $ f <* home) $ ZipRoseTrie tree []
+  (a, z) <- runStateT ((\ (UpdateRoseTrieT f) -> f) $ f <* home) $ ZipRoseTrie (tree, [])
   return (a, z~>zipperSubRoseTrie)
 
 -- | Analogous to 'Control.Monad.State.execStateT', does the same thing as 'runUpdateRoseTrieT' but

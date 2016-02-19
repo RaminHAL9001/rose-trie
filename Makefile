@@ -14,7 +14,7 @@ SOURCES := $(shell find src -type f -name '*.hs')
 LIBRARY := dist/build/$(PROJECT_NAME)
 export VIM_SESSION := .$(PROJECT_NAME).vim
 
-.PHONEY: all install clean edit configure config archive
+.PHONEY: all install clean renew edit configure config archive
 
 # This exists because it is easier to use than figure out how to make vim
 # properly parse compile time error log messages from GHC.
@@ -36,6 +36,8 @@ config: configure
 
 configure:
 	cabal configure
+
+renew: clean configure
 
 edit:
 	if [ -f '$(VIM_SESSION)' ]; \
