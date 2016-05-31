@@ -45,6 +45,7 @@ import           Data.Foldable
 import           Data.Lens.Minimal
 import           Data.Maybe
 import           Data.Monoid
+import           Data.Strict.Maybe
 import           Data.Typeable
 import qualified Data.Map as M
 import           Data.Traversable
