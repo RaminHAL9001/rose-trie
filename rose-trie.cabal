@@ -4,8 +4,7 @@
 name:     rose-trie
 version:  1.0.0.3
 synopsis:
-    Provides "Data.Tree.RoseTrie": trees with polymorphic paths to nodes, combining
-    properties of Rose Tree data structures and Trie data structures.
+    Trees with polymorphic paths to nodes, combining properties of Rose Trees and Tries.
 
 description:
     .
