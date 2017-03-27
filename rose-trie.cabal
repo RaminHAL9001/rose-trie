@@ -8,7 +8,7 @@ synopsis:
     properties of Rose Tree data structures and Trie data structures.
 
 description:
-	.
+    .
     A rose tree is a tree of trees, where every node contains a leaf and set of
     sub-trees. A trie is a tree structure where each node can be accessed using a
     "path," where a path is a list of keys. A rose-trie does both. RoseTries are
@@ -53,12 +53,12 @@ library
     DeriveDataTypeable
 
   build-depends:
-    containers   >=0.5.5.0 && <0.7.0.0,
-    deepseq      >=1.2.0.0 && <1.5.0.0,
-    mtl          >=2.2.0   && <=2.2.1,
-    minilens     >=1.0.0.1 && <=2.0.0.0,
-    transformers >=0.3.0.0 && <=0.4.3.0,
-    base         >=4.7     && <4.9
+      base         >=4.7     && <4.9
+    , containers   >=0.5.5.0 && <0.7.0.0
+    , deepseq      >=1.2.0.0 && <1.5.0.0
+    , mtl          >=2.2.0   && <=2.2.1
+    , minilens     >=1.0.0.1 && <=2.0.0.0
+    , transformers >=0.3.0.0 && <=0.4.3.0
 
   GHC-options: -Wall
     -fno-warn-name-shadowing
